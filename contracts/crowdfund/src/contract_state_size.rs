@@ -1,40 +1,9 @@
-//! # Contract State Size Limits
-//!
-//! This module enforces upper-bound limits on the size of unbounded collections
-//! stored in contract state to prevent:
-//!
-//! - **DoS via state bloat**: an attacker flooding the contributors or roadmap
-//!   lists until operations become too expensive to execute.
-//! - **Gas exhaustion**: iteration over an unbounded `Vec` in `withdraw`,
-//!   `refund`, or `collect_pledges` can exceed Soroban resource limits.
-//! - **Ledger entry size violations**: Soroban enforces a hard cap on the
-//!   serialised size of each ledger entry; exceeding it causes a host panic.
-//!
-//! ## Security Assumptions
-//!
-//! 1. `MAX_CONTRIBUTORS` caps the `Contributors` and `Pledgers` persistent
-//!    lists.  Any `contribute` or `pledge` call that would push the list past
-//!    this limit is rejected with [`ContractError::StateSizeLimitExceeded`].
-//! 2. `MAX_ROADMAP_ITEMS` caps the `Roadmap` instance list.
-//! 3. `MAX_STRING_LEN` caps every user-supplied `String` field (title,
-//!    description, social links, roadmap description) to prevent oversized
-//!    ledger entries.
-//! 4. `MAX_STRETCH_GOALS` caps the `StretchGoals` list.
-//!
-//! ## Limits (rationale)
-//!
-//! | Constant              | Value | Rationale                                      |
-//! |-----------------------|-------|------------------------------------------------|
-//! | `MAX_CONTRIBUTORS`    | 1 000 | Keeps `withdraw` / `refund` batch within gas   |
-//! | `MAX_ROADMAP_ITEMS`   |    20 | Cosmetic list; no operational iteration needed |
-//! | `MAX_STRETCH_GOALS`   |    10 | Small advisory list                            |
-//! | `MAX_STRING_LEN`      |   256 | Prevents oversized instance-storage entries    |
+#![no_std]
+use soroban_sdk::{Env, String};
 
 #![allow(missing_docs)]
 
-use soroban_sdk::{contracterror, Env, String, Vec};
-
-use crate::DataKey;
+use soroban_sdk::{contracterror, String, Vec};
 
 // ── Limits ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +12,9 @@ pub const MAX_CONTRIBUTORS: u32 = 128;
 
 /// Maximum number of unique pledgers tracked on-chain.
 pub const MAX_PLEDGERS: u32 = 128;
+
+/// Maximum number of unique pledgers tracked on-chain.
+pub const MAX_PLEDGERS: u32 = 1_000;
 
 /// Maximum number of roadmap items stored in instance storage.
 pub const MAX_ROADMAP_ITEMS: u32 = 32;
@@ -64,25 +36,54 @@ pub const MAX_ROADMAP_DESCRIPTION_LENGTH: u32 = 280;
 pub const MAX_METADATA_TOTAL_LENGTH: u32 = 2_304;
 /// Backward-compatible generic string limit used by legacy tests/helpers.
 pub const MAX_STRING_LEN: u32 = 256;
+pub const MAX_CONTRIBUTORS: u32 = 1_000;
 
-// ── Error ─────────────────────────────────────────────────────────────────────
+/// Maximum byte length of title field.
+pub const MAX_TITLE_LENGTH: u32 = 100;
 
-/// Returned when a state-size limit would be exceeded.
+/// Maximum byte length of description field.
+pub const MAX_DESCRIPTION_LENGTH: u32 = 2000;
+
+/// Maximum byte length of bonus goal description field.
+pub const MAX_BONUS_GOAL_DESCRIPTION_LENGTH: u32 = 500;
+
+/// Maximum byte length of roadmap description field.
+pub const MAX_ROADMAP_DESCRIPTION_LENGTH: u32 = 500;
+
+/// Maximum byte length of social links field.
+pub const MAX_SOCIAL_LINKS_LENGTH: u32 = 300;
+
+/// Maximum total byte length of all metadata fields combined.
+pub const MAX_METADATA_TOTAL_LENGTH: u32 = 4000;
+
+// ── Validation helpers ────────────────────────────────────────────────────────
+
+/// Validates that a title does not exceed MAX_TITLE_LENGTH bytes.
 ///
-/// @notice Callers should treat this as a permanent rejection for the current
-///         campaign state; the limit will not change without a contract upgrade.
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum StateSizeError {
-    /// The contributors / pledgers list is full.
-    ContributorLimitExceeded = 100,
-    /// The roadmap list is full.
-    RoadmapLimitExceeded = 101,
-    /// The stretch-goals list is full.
-    StretchGoalLimitExceeded = 102,
-    /// A string field exceeds `MAX_STRING_LEN` bytes.
-    StringTooLong = 103,
+/// @param title The title string to validate.
+/// @return Ok(()) if the title is within limits, Err with descriptive message otherwise.
+/// @notice Callers should treat errors as permanent rejections; the limit
+///         will not change without a contract upgrade.
+pub fn validate_title(title: &String) -> Result<(), &'static str> {
+    if title.len() > MAX_TITLE_LENGTH {
+        return Err("title exceeds MAX_TITLE_LENGTH bytes");
+    }
+    Ok(())
+}
+
+impl core::fmt::Display for StateSizeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            StateSizeError::ContributorLimitExceeded => {
+                f.write_str("contributor limit exceeded")
+            }
+            StateSizeError::RoadmapLimitExceeded => f.write_str("roadmap limit exceeded"),
+            StateSizeError::StretchGoalLimitExceeded => {
+                f.write_str("stretch goal limit exceeded")
+            }
+            StateSizeError::StringTooLong => f.write_str("string too long"),
+        }
+    }
 }
 
 impl core::fmt::Display for StateSizeError {
@@ -195,7 +196,8 @@ pub fn validate_stretch_goal_capacity(len: u32) -> Result<(), &'static str> {
 /// Assert that `s` does not exceed [`MAX_STRING_LEN`] bytes.
 ///
 /// @param s The string to validate.
-/// @return `Ok(())` when within limits, `Err(StateSizeError::StringTooLong)` otherwise.
+/// @return Ok(()) if within limits, Err with StateSizeError otherwise.
+/// @deprecated Use validate_title, validate_description, or validate_social_links instead.
 pub fn check_string_len(s: &String) -> Result<(), StateSizeError> {
     if s.len() > MAX_STRING_LEN {
         return Err(StateSizeError::StringTooLong);
@@ -203,13 +205,11 @@ pub fn check_string_len(s: &String) -> Result<(), StateSizeError> {
     Ok(())
 }
 
-/// Assert that adding one more entry to the `Contributors` list is allowed.
-///
-/// Reads the current list length from persistent storage and compares it
-/// against [`MAX_CONTRIBUTORS`].
+/// Legacy function for checking contributor limit.
 ///
 /// @param env Soroban environment reference.
-/// @return `Ok(())` when within limits, `Err(StateSizeError::ContributorLimitExceeded)` otherwise.
+/// @return Ok(()) if within limits, Err with StateSizeError otherwise.
+/// @deprecated Use validate_contributor_capacity instead.
 pub fn check_contributor_limit(env: &Env) -> Result<(), StateSizeError> {
     let contributors: Vec<soroban_sdk::Address> = env
         .storage()
@@ -223,10 +223,11 @@ pub fn check_contributor_limit(env: &Env) -> Result<(), StateSizeError> {
     Ok(())
 }
 
-/// Assert that adding one more entry to the `Pledgers` list is allowed.
+/// Legacy function for checking pledger limit.
 ///
 /// @param env Soroban environment reference.
-/// @return `Ok(())` when within limits, `Err(StateSizeError::ContributorLimitExceeded)` otherwise.
+/// @return Ok(()) if within limits, Err with StateSizeError otherwise.
+/// @deprecated Use validate_pledger_capacity instead.
 pub fn check_pledger_limit(env: &Env) -> Result<(), StateSizeError> {
     let pledgers: Vec<soroban_sdk::Address> = env
         .storage()
@@ -240,10 +241,11 @@ pub fn check_pledger_limit(env: &Env) -> Result<(), StateSizeError> {
     Ok(())
 }
 
-/// Assert that adding one more item to the `Roadmap` list is allowed.
+/// Legacy function for checking roadmap limit.
 ///
 /// @param env Soroban environment reference.
-/// @return `Ok(())` when within limits, `Err(StateSizeError::RoadmapLimitExceeded)` otherwise.
+/// @return Ok(()) if within limits, Err with StateSizeError otherwise.
+/// @deprecated Use validate_roadmap_capacity instead.
 pub fn check_roadmap_limit(env: &Env) -> Result<(), StateSizeError> {
     let roadmap: Vec<crate::RoadmapItem> = env
         .storage()
@@ -257,10 +259,11 @@ pub fn check_roadmap_limit(env: &Env) -> Result<(), StateSizeError> {
     Ok(())
 }
 
-/// Assert that adding one more stretch goal is allowed.
+/// Legacy function for checking stretch goal limit.
 ///
 /// @param env Soroban environment reference.
-/// @return `Ok(())` when within limits, `Err(StateSizeError::StretchGoalLimitExceeded)` otherwise.
+/// @return Ok(()) if within limits, Err with StateSizeError otherwise.
+/// @deprecated Use validate_stretch_goal_capacity instead.
 pub fn check_stretch_goal_limit(env: &Env) -> Result<(), StateSizeError> {
     let goals: Vec<i128> = env
         .storage()
@@ -274,101 +277,3 @@ pub fn check_stretch_goal_limit(env: &Env) -> Result<(), StateSizeError> {
     Ok(())
 }
 
-// ── Named limits (used by lib.rs validate_* calls) ───────────────────────────
-
-/// Maximum byte length of a campaign title.
-pub const MAX_TITLE_LENGTH: u32 = MAX_STRING_LEN;
-/// Maximum byte length of a campaign description.
-pub const MAX_DESCRIPTION_LENGTH: u32 = MAX_STRING_LEN;
-/// Maximum byte length of social links.
-pub const MAX_SOCIAL_LINKS_LENGTH: u32 = MAX_STRING_LEN;
-/// Maximum byte length of a roadmap item description.
-pub const MAX_ROADMAP_DESCRIPTION_LENGTH: u32 = MAX_STRING_LEN;
-/// Maximum byte length of a bonus-goal description.
-pub const MAX_BONUS_GOAL_DESCRIPTION_LENGTH: u32 = MAX_STRING_LEN;
-/// Maximum number of pledgers (alias of MAX_CONTRIBUTORS).
-pub const MAX_PLEDGERS: u32 = MAX_CONTRIBUTORS;
-/// Maximum combined byte length of all metadata fields.
-pub const MAX_METADATA_TOTAL_LENGTH: u32 = MAX_STRING_LEN * 3;
-
-// ── validate_* wrappers ───────────────────────────────────────────────────────
-
-/// Validate that a title string is within bounds.
-pub fn validate_title(s: &String) -> Result<(), StateSizeError> {
-    check_string_len(s)
-}
-
-/// Validate that a description string is within bounds.
-pub fn validate_description(s: &String) -> Result<(), StateSizeError> {
-    check_string_len(s)
-}
-
-/// Validate that a social-links string is within bounds.
-pub fn validate_social_links(s: &String) -> Result<(), StateSizeError> {
-    check_string_len(s)
-}
-
-/// Validate that a roadmap item description is within bounds.
-pub fn validate_roadmap_description(s: &String) -> Result<(), StateSizeError> {
-    check_string_len(s)
-}
-
-/// Validate that a bonus-goal description is within bounds.
-pub fn validate_bonus_goal_description(s: &String) -> Result<(), StateSizeError> {
-    check_string_len(s)
-}
-
-/// Validate combined metadata length does not exceed [`MAX_METADATA_TOTAL_LENGTH`].
-pub fn validate_metadata_total_length(
-    title_len: u32,
-    description_len: u32,
-    socials_len: u32,
-) -> Result<(), StateSizeError> {
-    let total = title_len
-        .saturating_add(description_len)
-        .saturating_add(socials_len);
-    if total > MAX_METADATA_TOTAL_LENGTH {
-        return Err(StateSizeError::StringTooLong);
-    }
-    Ok(())
-}
-
-/// Validate that the contributor list has not reached capacity.
-///
-/// @param current_len Current length of the contributors list.
-pub fn validate_contributor_capacity(current_len: u32) -> Result<(), StateSizeError> {
-    if current_len >= MAX_CONTRIBUTORS {
-        return Err(StateSizeError::ContributorLimitExceeded);
-    }
-    Ok(())
-}
-
-/// Validate that the pledger list has not reached capacity.
-///
-/// @param current_len Current length of the pledgers list.
-pub fn validate_pledger_capacity(current_len: u32) -> Result<(), StateSizeError> {
-    if current_len >= MAX_PLEDGERS {
-        return Err(StateSizeError::ContributorLimitExceeded);
-    }
-    Ok(())
-}
-
-/// Validate that the roadmap list has not reached capacity.
-///
-/// @param current_len Current length of the roadmap list.
-pub fn validate_roadmap_capacity(current_len: u32) -> Result<(), StateSizeError> {
-    if current_len >= MAX_ROADMAP_ITEMS {
-        return Err(StateSizeError::RoadmapLimitExceeded);
-    }
-    Ok(())
-}
-
-/// Validate that the stretch-goals list has not reached capacity.
-///
-/// @param current_len Current length of the stretch-goals list.
-pub fn validate_stretch_goal_capacity(current_len: u32) -> Result<(), StateSizeError> {
-    if current_len >= MAX_STRETCH_GOALS {
-        return Err(StateSizeError::StretchGoalLimitExceeded);
-    }
-    Ok(())
-}

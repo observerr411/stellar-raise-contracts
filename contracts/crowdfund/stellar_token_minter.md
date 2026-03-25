@@ -384,6 +384,19 @@ Security notes validated by this suite:
 - Upgrade remains admin-gated.
 - Bonus-goal progress is capped at 10,000 bps (100%) for UI safety.
 
+### Latest token-minter focused test execution
+
+Run command:
+
+```bash
+cargo test --package crowdfund stellar_token_minter_test
+```
+
+Security notes validated by this suite:
+- Deadline/goal gates prevent premature or invalid `collect_pledges`.
+- Upgrade remains admin-gated.
+- Bonus-goal progress is capped at 10,000 bps (100%) for UI safety.
+
 Run with:
 
 ```bash
