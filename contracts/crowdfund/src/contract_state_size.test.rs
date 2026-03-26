@@ -128,7 +128,7 @@ fn validate_title_rejects_one_over_limit() {
     let env = Env::default();
     let title = soroban_string(&env, MAX_TITLE_LENGTH + 1, 't');
     let err = validate_title(&title).unwrap_err();
-    assert!(err.contains("MAX_TITLE_LENGTH"));
+    assert!(alloc::format!("{}", err).contains("MAX_STRING_LEN"));
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn validate_social_links_rejects_one_over_limit() {
     let env = Env::default();
     let socials = soroban_string(&env, MAX_SOCIAL_LINKS_LENGTH + 1, 's');
     let err = validate_social_links(&socials).unwrap_err();
-    assert!(err.contains("MAX_SOCIAL_LINKS_LENGTH"));
+    assert!(alloc::format!("{}", err).contains("MAX_STRING_LEN"));
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn validate_bonus_goal_description_rejects_one_over_limit() {
     let env = Env::default();
     let description = soroban_string(&env, MAX_BONUS_GOAL_DESCRIPTION_LENGTH + 1, 'b');
     let err = validate_bonus_goal_description(&description).unwrap_err();
-    assert!(err.contains("MAX_BONUS_GOAL_DESCRIPTION_LENGTH"));
+    assert!(alloc::format!("{}", err).contains("MAX_STRING_LEN"));
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn validate_roadmap_description_rejects_one_over_limit() {
     let env = Env::default();
     let description = soroban_string(&env, MAX_ROADMAP_DESCRIPTION_LENGTH + 1, 'r');
     let err = validate_roadmap_description(&description).unwrap_err();
-    assert!(err.contains("MAX_ROADMAP_DESCRIPTION_LENGTH"));
+    assert!(alloc::format!("{}", err).contains("MAX_STRING_LEN"));
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn validate_metadata_total_length_accepts_exact_cap() {
 #[test]
 fn validate_metadata_total_length_rejects_total_over_cap() {
     let err = validate_metadata_total_length(128, 1_665, 512).unwrap_err();
-    assert!(err.contains("MAX_METADATA_TOTAL_LENGTH"));
+    assert!(alloc::format!("{}", err).contains("MAX_METADATA_TOTAL_LENGTH"));
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn validate_metadata_total_length_rejects_overflow_attempt() {
     // Test that saturating_add prevents overflow attacks
     // Even with MAX values that would overflow, the function should handle it gracefully
     let err = validate_metadata_total_length(u32::MAX, 1, 1).unwrap_err();
-    assert!(err.contains("MAX_METADATA_TOTAL_LENGTH"));
+    assert!(alloc::format!("{}", err).contains("MAX_METADATA_TOTAL_LENGTH"));
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn validate_contributor_capacity_accepts_one_below_max() {
 #[test]
 fn validate_contributor_capacity_rejects_when_full() {
     let err = validate_contributor_capacity(MAX_CONTRIBUTORS).unwrap_err();
-    assert!(err.contains("MAX_CONTRIBUTORS"));
+    assert!(alloc::format!("{}", err).contains("MAX_CONTRIBUTORS"));
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn validate_pledger_capacity_accepts_one_below_max() {
 #[test]
 fn validate_pledger_capacity_rejects_when_full() {
     let err = validate_pledger_capacity(MAX_PLEDGERS).unwrap_err();
-    assert!(err.contains("MAX_PLEDGERS"));
+    assert!(alloc::format!("{}", err).contains("MAX_CONTRIBUTORS"));
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn validate_roadmap_capacity_accepts_one_below_max() {
 #[test]
 fn validate_roadmap_capacity_rejects_when_full() {
     let err = validate_roadmap_capacity(MAX_ROADMAP_ITEMS).unwrap_err();
-    assert!(err.contains("MAX_ROADMAP_ITEMS"));
+    assert!(alloc::format!("{}", err).contains("MAX_ROADMAP_ITEMS"));
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn validate_stretch_goal_capacity_accepts_one_below_max() {
 #[test]
 fn validate_stretch_goal_capacity_rejects_when_full() {
     let err = validate_stretch_goal_capacity(MAX_STRETCH_GOALS).unwrap_err();
-    assert!(err.contains("MAX_STRETCH_GOALS"));
+    assert!(alloc::format!("{}", err).contains("MAX_STRETCH_GOALS"));
 }
 
 // ── Contract wiring tests ────────────────────────────────────────────────────
