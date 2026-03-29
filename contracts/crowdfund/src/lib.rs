@@ -25,6 +25,11 @@ mod refund_single_token_test;
 
 pub mod soroban_sdk_minor;
 
+pub mod cross_rollup_communication;
+#[cfg(test)]
+#[path = "cross_rollup_communication_test.rs"]
+mod cross_rollup_communication_test;
+
 #[cfg(test)]
 mod auth_tests;
 pub mod campaign_goal_minimum;
@@ -1050,5 +1055,48 @@ impl CrowdfundContract {
     /// Returns the configured NFT contract address, if any.
     pub fn nft_contract(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::NFTContract)
+    }
+
+    // ── Cross-contract communication ─────────────────────────────────────────
+
+    /// Register an external contract in the trusted allowlist.
+    ///
+    /// Only the admin may call this. Idempotent — safe to call multiple times
+    /// with the same address.
+    ///
+    /// # Arguments
+    /// * `admin`             – Must match the stored admin; auth required.
+    /// * `contract_address`  – The external contract to trust.
+    pub fn register_trusted_contract(
+        env: Env,
+        admin: Address,
+        contract_address: Address,
+    ) -> Result<(), ContractError> {
+        cross_rollup_communication::register_trusted_contract(&env, &admin, &contract_address)
+    }
+
+    /// Remove an external contract from the trusted allowlist.
+    ///
+    /// Only the admin may call this. No-ops if the address was not registered.
+    ///
+    /// # Arguments
+    /// * `admin`             – Must match the stored admin; auth required.
+    /// * `contract_address`  – The external contract to remove.
+    pub fn deregister_trusted_contract(
+        env: Env,
+        admin: Address,
+        contract_address: Address,
+    ) -> Result<(), ContractError> {
+        cross_rollup_communication::deregister_trusted_contract(&env, &admin, &contract_address)
+    }
+
+    /// Returns the list of currently trusted external contract addresses.
+    pub fn trusted_contracts(env: Env) -> Vec<Address> {
+        cross_rollup_communication::trusted_contracts(&env)
+    }
+
+    /// Returns `true` if `contract_address` is in the trusted allowlist.
+    pub fn is_trusted_contract(env: Env, contract_address: Address) -> bool {
+        cross_rollup_communication::is_trusted(&env, &contract_address)
     }
 }
